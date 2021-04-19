@@ -60,16 +60,16 @@
           >
             Вперед
           </button>
-          <div>Фильтр: <input v-model="filter" type="text"></div>
+          <div>Фильтр: <input v-model="filter" @input="page = 1" type="text"></div>
         </div>
         <hr class="w-full border-t border-gray-600 my-4" />
         <dl class="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-3">
           <div
-            v-for="t in filteredTickers()"
+            v-for="t in paginatedTickers"
             :key="t.name"
             @click="select(t)"
             :class="{
-              'border-4': sel === t
+              'border-4': selectedTicker === t
             }"
             class="bg-white overflow-hidden shadow rounded-lg border-purple-800 border-solid cursor-pointer"
           >
@@ -105,20 +105,20 @@
         <hr class="w-full border-t border-gray-600 my-4" />
       </template>
 
-      <section v-if="sel" class="relative">
+      <section v-if="selectedTicker" class="relative">
         <h3 class="text-lg leading-6 font-medium text-gray-900 my-8">
-          {{ sel.name }} - USD
+          {{ selectedTicker.name }} - USD
         </h3>
         <div class="flex items-end border-gray-600 border-b border-l h-64">
           <div
-            v-for="(bar, idx) in normalizeGraph()"
+            v-for="(bar, idx) in normalizedGraph"
             :key="idx"
             :style="{ height: `${bar}%` }"
             class="bg-purple-800 border w-10"
           ></div>
         </div>
         <button
-          @click="sel = null"
+          @click="selectedTicker = null"
           type="button"
           class="absolute top-0 right-0"
         >
@@ -150,29 +150,57 @@
 </template>
 
 <script>
+// [x] 6. The presence in a state dependent data | 5+
+// [ ] 4. Requests directly in API | 5
+// [ ] 2. After delete we have subscribe to load tickers | 5
+// [ ] 5. Errors API | 5
+// [ ] 3. Qty of requests | 4 
+// [x] 8. after delete tickers, don t change LS | 4
+// [x] 1. Same code in watch | 3
+// [ ] 9. localStorage and anonim tabs (not access LS) | 3
+// [ ] 7. Graph ugly | 2
+// [ ] 10. Magic strings and numbers (UrL, 5000, localStorage, qty on page) | 1
+
+// Parallel
+// [x] Graph is broken if everywhere the same values
+// [x] after delete ticket we have choice
 export default {
   name: "App",
 
   data() {
     return {
       ticker: "",
+      filter: "",
+
       tickers: [],
-      sel: null,
+      selectedTicker: null,
+
       graph: [],
+      
       page: 1,
-      filter: '',
-      hasNextPage: true,
+      // hasNextPage: true,
     };
   },
 
   created() {
     const windowData = Object.fromEntries(new URL(window.location).searchParams.entries())
-    if(windowData.filter) {
-      this.filter = windowData.filter
-    }
-    if(windowData.page) {
-      this.page = windowData.page
-    }
+
+
+    const VALID_KEYS = ['filter', 'page']
+
+    VALID_KEYS.forEach(key => {
+      if(windowData[key]) {
+        this[key] = windowData[key]
+      }
+    })
+    // Object.assign(this, windowData)
+    // Object.assign(this, _.pick(windowData, VALID_KEYS))
+    // if(windowData.filter) {
+    //   this.filter = windowData.filter
+    // }
+    // if(windowData.page) {
+    //   this.page = windowData.page
+    // }
     const tickersData = localStorage.getItem("crypto-list");
 
     if (tickersData) {
@@ -183,28 +211,78 @@ export default {
     }
   },
   watch: {
+    // when some conditions occur, do this
+    tickers(newValue, oldValue) {
+      console.log(newValue === oldValue);
+      localStorage.setItem("crypto-list", JSON.stringify(this.tickers));
+    },
+    selectedTicker() {
+      this.graph = []
+    },
+    paginatedTickers() {
+      if(this.paginatedTickers.length === 0 && this.page > 1) {
+        this.page -= 1
+      }
+      
+    },
     filter() {
       this.page = 1
-      window.history.pushState(null, document.title, `${window.location.pathname}?filter=${this.filter}&page=${this.page}`)
+      // window.history.pushState(null, document.title, `${window.location.pathname}?filter=${this.filter}&page=${this.page}`)
     },
-    page() {
-      window.history.pushState(null, document.title, `${window.location.pathname}?filter=${this.filter}&page=${this.page}`)
+    pageStateOptions(v) {
+      window.history.pushState(null, document.title, `${window.location.pathname}?filter=${v.filter}&page=${v.page}`)
     }
   },
-
-  methods: {
+  computed: {
+    startIdx() {
+      return (this.page - 1) * 6
+    },
+    endIdx() {
+      return this.page * 6
+    },
+    // this method contains page, filter and tickers - state
+    // should be in another place - COMPUTED
+    // vue add cash in result
+    // computed does counting
+    // uses the data in the template, calculates and changes nothing
     filteredTickers() {
       // 1 - 0-5
       // 2 - 6-11
       // (6 * (page -1), 6 * page -1)
-      const start = (this.page - 1) * 6
-      const end = this.page * 6
-      const filteredTickers = this.tickers
-        .filter(ticker => ticker.name.includes(this.filter))
-
-      this.hasNextPage = filteredTickers.length > end
-      return filteredTickers.slice(start, end)
+      // const start = (this.page - 1) * 6
+      // const end = this.page * 6
+      return this.tickers.filter(ticker => 
+        ticker.name.includes(this.filter))
+      // this.hasNextPage = filteredTickers.length > end
     },
+    paginatedTickers() {
+      return this.filteredTickers.slice(this.startIdx, this.endIdx)
+    },
+    hasNextPage() {
+      return this.filteredTickers.length > this.endIdx
+    },
+    normalizedGraph() {
+      // don t change anything and doing compute
+      const maxValue = Math.max(...this.graph);
+      const minValue = Math.min(...this.graph);
+
+      if(maxValue === minValue) {
+        return this.graph.map(() => 50)
+      }
+      return this.graph.map(
+        price => 5 + ((price - minValue) * 95) / (maxValue - minValue)
+      );
+    },
+    pageStateOptions() {
+      return {
+        filter: this.filter,
+        page: this.page
+      }
+    }
+  },
+
+  methods: {
+    
     subscribeToUpdates(tickerName) {
       setInterval(async () => {
         const f = await fetch(
@@ -214,7 +292,7 @@ export default {
         // this.tickers.find(t => t.name === currentTicker.name).price = data.USD > 1 ? data.USD.toFixed(2) : data.USD.toPrecision(2);
         this.tickers.find(t => t.name === tickerName).price =
           data.USD > 1 ? data.USD.toFixed(2) : data.USD.toPrecision(2);
-        if (this.sel?.name === tickerName) {
+        if (this.selectedTicker?.name === tickerName) {
           this.graph.push(data.USD);
         }
       }, 5000);
@@ -226,26 +304,23 @@ export default {
         price: "-"
       };
 
-   
-      this.tickers.push(currentTicker);
+      this.tickers = [...this.tickers, currentTicker];
       this.filter = ''
 
-      localStorage.setItem("crypto-list", JSON.stringify(this.tickers));
       this.subscribeToUpdates(currentTicker.name)
     },
     deleteTicker(tickerToRemove) {
       this.tickers = this.tickers.filter(t => t !== tickerToRemove);
+      // if(this.paginatedTickers.length === 0 && this.page > 1) {
+      //   this.page -= 1
+      // }
+      if(this.selectedTicker === tickerToRemove) {
+        this.selectedTicker = null
+      }
     },
-    normalizeGraph() {
-      const maxValue = Math.max(...this.graph);
-      const minValue = Math.min(...this.graph);
-
-      return this.graph.map(
-        price => 5 + ((price - minValue) * 95) / (maxValue - minValue)
-      );
-    },
+    
     select(ticker) {
-      this.sel = ticker;
+      this.selectedTicker = ticker;
       this.graph = [];
     }
   }
